@@ -1,0 +1,204 @@
+# ═══════════════════════════════════════════════════════════════════
+# OmniSight CI/CD Pipeline
+# ═══════════════════════════════════════════════════════════════════
+# Triggers:
+#   push → main          full pipeline (lint + test + build + push)
+#   pull_request → main  lint + test only (no image push)
+#
+# Required GitHub Secrets:
+#   DOCKERHUB_USERNAME   your Docker Hub username
+#   DOCKERHUB_TOKEN      Docker Hub access token (not password)
+#
+# Optional (add for production deploy step):
+#   OCI_SSH_KEY          private key for OCI instance
+#   OCI_HOST             IP or hostname of your OCI node
+# ═══════════════════════════════════════════════════════════════════
+
+name: OmniSight CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  IMAGE_NAME: omnisight-airflow
+  PYTHON_VERSION: "3.11"
+
+jobs:
+
+  # ────────────────────────────────────────────────────────────────
+  # JOB 1: Lint
+  # ────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install lint tools
+        run: pip install ruff mypy
+
+      - name: Ruff — style + import order
+        run: ruff check airflow/dags/ --select E,W,F,I --line-length 100
+
+      - name: Ruff — format check
+        run: ruff format --check airflow/dags/
+
+      - name: Type check (mypy)
+        run: mypy airflow/dags/omnisight_pipeline.py --ignore-missing-imports --no-strict-optional
+
+
+  # ────────────────────────────────────────────────────────────────
+  # JOB 2: Test
+  # ────────────────────────────────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-cov pytest-mock
+
+      - name: Run test suite
+        run: |
+          pytest airflow/tests/ \
+            -v \
+            --tb=short \
+            --cov=airflow/dags \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=80
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+      - name: Coverage badge (main branch only)
+        if: github.ref == 'refs/heads/main'
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+
+
+  # ────────────────────────────────────────────────────────────────
+  # JOB 3: Security scan
+  # ────────────────────────────────────────────────────────────────
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install bandit
+        run: pip install bandit
+
+      - name: Bandit — Python security scan
+        run: |
+          bandit -r airflow/dags/ \
+            --severity-level medium \
+            --confidence-level medium \
+            -f txt
+
+      - name: Check for hardcoded secrets (detect-secrets)
+        run: |
+          pip install detect-secrets
+          detect-secrets scan airflow/dags/ --baseline .secrets.baseline || true
+          detect-secrets audit .secrets.baseline --only-allowlisted
+
+
+  # ────────────────────────────────────────────────────────────────
+  # JOB 4: Build & push Docker image
+  # Only runs on push to main, after lint + test + security pass
+  # ────────────────────────────────────────────────────────────────
+  build-push:
+    name: Build & push image
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image vulnerability scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+          format: table
+          exit-code: 1
+          severity: CRITICAL
+
+
+  # ────────────────────────────────────────────────────────────────
+  # JOB 5: Deploy to OCI (optional — uncomment when ready)
+  # ────────────────────────────────────────────────────────────────
+  # deploy:
+  #   name: Deploy to OCI
+  #   runs-on: ubuntu-latest
+  #   needs: build-push
+  #   environment: production
+  #   steps:
+  #     - name: SSH deploy
+  #       uses: appleboy/ssh-action@v1
+  #       with:
+  #         host:     ${{ secrets.OCI_HOST }}
+  #         username: opc
+  #         key:      ${{ secrets.OCI_SSH_KEY }}
+  #         script: |
+  #           cd /opt/omnisight
+  #           docker compose pull
+  #           docker compose up -d --no-build
+  #           docker image prune -f

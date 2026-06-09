@@ -1,0 +1,114 @@
+# ═══════════════════════════════════════════════════════════════════
+# OmniSight — Full Local Stack
+# ═══════════════════════════════════════════════════════════════════
+# Services:
+#   postgres   — partitioned fact tables
+#   airflow    — DAG scheduler + worker
+#   api        — FastAPI gateway (port 8001)
+#   nginx      — reverse proxy + TLS termination
+#
+# Start:   docker compose up -d
+# Logs:    docker compose logs -f airflow
+# Stop:    docker compose down
+#
+# SECRETS: copy .env.example → .env and fill in real values.
+#          Never commit .env to git.
+# ═══════════════════════════════════════════════════════════════════
+
+version: "3.9"
+
+x-airflow-common: &airflow-common
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  env_file: ../.env
+  environment:
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+  volumes:
+    - ../airflow/dags:/home/omnisight/dags:ro
+    - airflow-logs:/home/omnisight/airflow/logs
+  depends_on:
+    postgres:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+
+  # ── PostgreSQL ─────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    # Postgres not exposed externally — internal network only
+    expose:
+      - "5432"
+
+  # ── Airflow ────────────────────────────────────────────────────
+  airflow:
+    <<: *airflow-common
+    ports:
+      - "8080:8080"   # Airflow UI — restrict to localhost in production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  # ── FastAPI gateway ────────────────────────────────────────────
+  api:
+    build:
+      context: ../api
+      dockerfile: Dockerfile
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ── Nginx reverse proxy ────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro          # mount host certs
+      - /var/www/letsencrypt:/var/www/letsencrypt:ro  # ACME challenge
+      - /var/www/ericdiamason_portfolio:/var/www/portfolio:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  airflow-logs:
+
+networks:
+  default:
+    name: omnisight-net
