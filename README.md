@@ -152,4 +152,4 @@ Deployed on OCI Linux (Always Free tier):
 Built by **Eric Dia Mason** — Principal Architect & Web3 Data Engineer.  
 Specialising in production data pipelines, ML-driven risk scoring, and blockchain infrastructure.
 
-[ericdiamason.tech](https://ericdiamason.tech) · [LinkedIn](https://linkedin.com/in/ericdiamason) · [eric@ericdiamason.tech](mailto:eric@ericdiamason.tech)
+[ericdiamason.tech](https://ericdiamason.tech) · [LinkedIn]https://www.linkedin.com/in/eric-mason-dba/ · [admin@ericdiamason.tech](mailto:admin@ericdiamason.tech)
