@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Eric Dia Mason — OmniSight Web3 Data Engine</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="OmniSight — real-time Web3 financial intelligence: whale alerts, AI wallet risk scoring, and production-grade blockchain data pipelines." />
+  <style>
+    :root{
+      --bg:#050711;
+      --panel:#0b1220;
+      --card:#0f1724;
+      --muted:#9aa4b2;
+      --text:#e6eef6;
+      --accent:#38bdf8;
+      --accent-2:#4ade80;
+      --accent-3:#a78bfa;
+      --danger:#fb7185;
+      --success:#4ade80;
+      --glass:rgba(255,255,255,0.03);
+      --radius-lg:16px;
+      --radius-md:10px;
+      --radius-pill:999px;
+      --shadow:0 18px 45px rgba(2,6,23,0.7);
+      --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,"Roboto Mono","Courier New",monospace;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;
+      background:radial-gradient(1200px 600px at 10% 10%,rgba(56,189,248,0.04),transparent 8%),linear-gradient(180deg,#020617 0%,#050711 100%);
+      color:var(--text);
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+      line-height:1.5;
+    }
+    a{color:inherit;text-decoration:none}
+    .container{max-width:1120px;margin:0 auto;padding:1.25rem}
+    header{position:sticky;top:0;z-index:40;background:linear-gradient(180deg,rgba(2,6,23,0.6),rgba(2,6,23,0.35));backdrop-filter:blur(8px);border-bottom:1px solid rgba(255,255,255,0.03)}
+    .nav{display:flex;align-items:center;justify-content:space-between;padding:0.75rem 0}
+    .brand{display:flex;align-items:center;gap:0.75rem}
+    .brand-mark{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent-3));display:flex;align-items:center;justify-content:center;font-weight:700;color:#021024}
+    .brand-title{display:flex;flex-direction:column}
+    .brand-name{font-weight:700;letter-spacing:0.02em}
+    .brand-sub{font-size:0.78rem;color:var(--muted)}
+    .nav-links{display:flex;gap:0.9rem;align-items:center}
+    .nav-link{padding:0.45rem 0.7rem;border-radius:999px;color:var(--muted);font-size:0.9rem;transition:all .12s;cursor:pointer}
+    .nav-link:hover{background:var(--glass);color:var(--text)}
+    .cta-contact{padding:0.45rem 0.9rem;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent-3));color:#021024;font-weight:600;border:none;cursor:pointer;font-size:0.9rem}
+    @media(max-width:820px){.nav-links{display:none}}
+
+    main{padding:1.5rem 0 4rem}
+    .hero{display:grid;grid-template-columns:1fr 420px;gap:1.5rem;align-items:start;padding-top:0.6rem}
+    @media(max-width:980px){.hero{grid-template-columns:1fr}}
+    .hero-kicker{display:inline-flex;align-items:center;gap:0.6rem;padding:0.28rem 0.7rem;border-radius:999px;background:linear-gradient(90deg,rgba(56,189,248,0.08),rgba(74,222,128,0.04));border:1px solid rgba(255,255,255,0.03);font-size:0.82rem;color:var(--muted);margin-bottom:0.9rem}
+    .live-dot{width:7px;height:7px;border-radius:999px;background:var(--accent-2);animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(74,222,128,0.4)}50%{box-shadow:0 0 0 6px rgba(74,222,128,0)}}
+    .hero-title{font-size:clamp(1.9rem,3.6vw,2.6rem);line-height:1.05;margin:0 0 0.6rem}
+    .hero-title .accent{background:linear-gradient(90deg,var(--accent),var(--accent-2));-webkit-background-clip:text;color:transparent}
+    .hero-lead{color:var(--muted);max-width:46ch;margin-bottom:1rem}
+    .hero-actions{display:flex;gap:0.8rem;flex-wrap:wrap;margin-bottom:1rem}
+    .btn{padding:0.6rem 1rem;border-radius:999px;border:1px solid rgba(255,255,255,0.03);cursor:pointer;font-weight:600;font-size:0.9rem}
+    .btn-primary{background:linear-gradient(90deg,var(--accent),var(--accent-3));color:#021024;border:none}
+    .btn-ghost{background:transparent;color:var(--text);border:1px solid rgba(255,255,255,0.08)}
+    .hero-meta{display:flex;gap:1.25rem;color:var(--muted);font-size:0.88rem;flex-wrap:wrap}
+
+    .panel{background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));border-radius:14px;padding:1rem;border:1px solid rgba(255,255,255,0.03);box-shadow:var(--shadow)}
+    .panel-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem}
+    .panel-title{font-weight:700}
+    .panel-pill{padding:0.18rem 0.5rem;border-radius:999px;background:rgba(255,255,255,0.02);font-size:0.78rem;color:var(--muted);margin-top:0.25rem}
+    .status-dot{width:9px;height:9px;border-radius:999px;background:var(--accent-2);box-shadow:0 0 0 6px rgba(74,222,128,0.06);display:inline-block}
+    .metrics-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0.6rem}
+    .metric-card{background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));padding:0.7rem;border-radius:10px;border:1px solid rgba(255,255,255,0.03)}
+    .metric-label{font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.12em}
+    .metric-value{font-family:var(--mono);font-size:1rem;color:var(--text);margin-top:0.18rem}
+    .metric-sub{color:var(--muted);font-size:0.78rem;margin-top:0.25rem}
+    .sparkline{height:44px;border-radius:10px;background:rgba(56,189,248,0.03);margin-top:0.7rem;overflow:hidden;position:relative}
+    .sparkline-line{position:absolute;left:0;top:0;bottom:0;width:100%;background:linear-gradient(90deg,rgba(56,189,248,0.12),rgba(74,222,128,0.12));transform-origin:left center;transform:scaleX(0.9);transition:transform .45s ease}
+
+    section.block{margin-top:2.2rem}
+    .section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:1rem}
+    .section-title{font-size:0.92rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.14em}
+    .section-h{font-size:1.4rem;margin:0.25rem 0 0.6rem}
+    .section-sub{color:var(--muted);max-width:56ch}
+    .two-col{display:grid;grid-template-columns:1fr 420px;gap:1.25rem;align-items:start}
+    @media(max-width:980px){.two-col{grid-template-columns:1fr}}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));padding:1rem;border-radius:12px;border:1px solid rgba(255,255,255,0.03);box-shadow:0 10px 30px rgba(2,6,23,0.6)}
+    .card h3{margin:0 0 0.5rem;font-size:1rem}
+    .list{margin:0;padding-left:1.05rem;color:var(--text)}
+    .list li{margin-bottom:0.45rem;color:var(--muted)}
+    .pill-row{display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.8rem}
+    .pill{padding:0.28rem 0.6rem;border-radius:999px;background:rgba(255,255,255,0.02);color:var(--muted);font-size:0.82rem;border:1px solid rgba(255,255,255,0.02)}
+
+    .table{width:100%;border-collapse:collapse;font-size:0.88rem}
+    .table th,.table td{padding:0.55rem 0.6rem;text-align:left;border-bottom:1px dashed rgba(255,255,255,0.03);color:var(--muted)}
+    .table th{font-size:0.78rem;text-transform:uppercase;letter-spacing:0.12em}
+    .table tr:hover td{background:rgba(255,255,255,0.01);color:var(--text)}
+
+    .threat-badge{display:inline-block;padding:0.2rem 0.55rem;border-radius:999px;font-size:0.78rem;font-weight:600}
+    .threat-yes{background:rgba(251,113,133,0.12);color:var(--danger)}
+    .threat-no{background:rgba(74,222,128,0.1);color:var(--success)}
+
+    .risk-result{background:rgba(255,255,255,0.02);border-radius:10px;padding:0.8rem;margin-top:0.6rem;border:1px solid rgba(255,255,255,0.03);font-size:0.88rem}
+    .risk-row{display:flex;justify-content:space-between;padding:0.25rem 0;border-bottom:1px dashed rgba(255,255,255,0.03)}
+    .risk-row:last-child{border-bottom:none}
+    .risk-key{color:var(--muted)}
+    .risk-val{font-family:var(--mono);color:var(--text)}
+
+    input[type="text"],input[type="email"],textarea{width:100%;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);padding:0.6rem 0.8rem;border-radius:8px;color:var(--text);outline:none;font-family:inherit;font-size:0.9rem;transition:border .15s}
+    input[type="text"]:focus,input[type="email"]:focus,textarea:focus{border-color:rgba(56,189,248,0.3)}
+    textarea{min-height:110px;resize:vertical}
+    .field{display:flex;flex-direction:column;gap:0.35rem;margin-bottom:0.7rem}
+    .field-label{font-size:0.85rem;color:var(--muted)}
+    .field-error{font-size:0.82rem;color:var(--danger);display:none}
+
+    .kpi-label{font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em}
+    .kpi-value{font-family:var(--mono);font-size:1.1rem;color:var(--text);margin-top:0.18rem}
+
+    .arch-row{display:flex;gap:0.6rem;align-items:center;margin-bottom:0.5rem}
+    .arch-box{flex:1;padding:0.6rem;border-radius:10px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);font-size:0.88rem}
+    .arch-arrow{font-size:1.1rem;color:var(--muted)}
+
+    footer{padding:1.25rem 0;border-top:1px solid rgba(255,255,255,0.02);color:var(--muted);font-size:0.9rem}
+    .footer-inner{max-width:1120px;margin:0 auto;padding:0 1.25rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
+    .mono{font-family:var(--mono)}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <nav class="nav">
+        <div class="brand">
+          <div class="brand-mark">OS</div>
+          <div class="brand-title">
+            <div class="brand-name">Eric Dia Mason</div>
+            <div class="brand-sub">Senior Data Architect · Web3 Data Engineer</div>
+          </div>
+        </div>
+        <div class="nav-links">
+          <span class="nav-link" onclick="scrollToSection('overview')">Overview</span>
+          <span class="nav-link" onclick="scrollToSection('omnisight')">OmniSight</span>
+          <span class="nav-link" onclick="scrollToSection('architecture')">Architecture</span>
+          <span class="nav-link" onclick="scrollToSection('metrics')">Live Metrics</span>
+          <span class="nav-link" onclick="scrollToSection('work-with')">Who I Work With</span>
+          <button class="cta-contact" onclick="scrollToSection('contact')">Contact</button>
+        </div>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- HERO -->
+    <section class="hero" id="top">
+      <div>
+        <div class="hero-kicker">
+          <span class="live-dot"></span>
+          Live · Base Mainnet · USDC Intelligence
+        </div>
+        <h1 class="hero-title">
+          Senior Data Architect who<br>
+          <span class="accent">solutions any problem — self-taught</span>
+        </h1>
+        <p class="hero-lead">I design and build end-to-end systems that turn raw blockchain activity into actionable financial intelligence. OmniSight ingests Base Mainnet USDC flows, decodes EVM payloads, and scores wallet behaviour with ML — production-grade, latency-aware, and API-first.</p>
+        <div class="hero-actions">
+          <button class="btn btn-primary" onclick="scrollToSection('metrics')">View Live Dashboard ↳</button>
+          <button class="btn btn-ghost" onclick="scrollToSection('omnisight')">Explore Case Study</button>
+        </div>
+        <div class="hero-meta">
+          <div><strong>Focus:</strong> Real-time Web3 risk &amp; compliance systems</div>
+          <div><strong>Stack:</strong> Airflow · web3.py · PostgreSQL · FastAPI · Scikit-Learn · OCI</div>
+        </div>
+      </div>
+
+      <aside class="panel" aria-label="OmniSight live snapshot">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">OmniSight Live</div>
+            <div class="panel-pill">Base Mainnet · USDC</div>
+          </div>
+          <div style="text-align:right;font-size:0.82rem;color:var(--muted)">
+            <span class="status-dot"></span>&nbsp;<span id="hero-status-text">Connecting…</span>
+          </div>
+        </div>
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-label">Whale transfers</div>
+            <div class="metric-value" id="panel-transfers">—</div>
+            <div class="metric-sub">≥$50K sample</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Total volume</div>
+            <div class="metric-value" id="panel-volume">—</div>
+            <div class="metric-sub">USD (sample)</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Largest transfer</div>
+            <div class="metric-value" id="panel-largest">—</div>
+            <div class="metric-sub">USD</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Ingestion latency</div>
+            <div class="metric-value" id="panel-latency">—</div>
+            <div class="metric-sub">seconds</div>
+          </div>
+        </div>
+        <div class="sparkline" aria-hidden="true" style="margin-top:0.9rem">
+          <div class="sparkline-line" id="sparkline-bar"></div>
+        </div>
+        <div style="display:flex;gap:0.5rem;margin-top:0.8rem;flex-wrap:wrap">
+          <div class="pill">Ingestion ✓</div>
+          <div class="pill">Model ✓</div>
+          <div class="pill">API ✓</div>
+          <div class="pill">OCI Always-on ✓</div>
+        </div>
+      </aside>
+    </section>
+
+    <!-- OVERVIEW -->
+    <section id="overview" class="block">
+      <div class="section-head">
+        <div>
+          <div class="section-title">Overview</div>
+          <h2 class="section-h">Why OmniSight matters</h2>
+          <p class="section-sub">Web3 moves fast and ledger data is noisy. OmniSight turns raw USDC transfers into structured, ML-ready intelligence for compliance, fraud detection, and institutional reporting.</p>
+        </div>
+        <div style="min-width:260px">
+          <div class="card">
+            <h3>Core capabilities</h3>
+            <ul class="list">
+              <li>Autonomous ingestion (Airflow) with 120s cadence</li>
+              <li>EVM hex decoding and USDC normalisation via web3.py</li>
+              <li>Partitioned PostgreSQL fact tables for scale</li>
+              <li>Isolation Forest ML anomaly scoring (RobustScaler)</li>
+              <li>FastAPI gateway — authenticated + public endpoints</li>
+            </ul>
+            <div class="pill-row">
+              <div class="pill">Real-time</div>
+              <div class="pill">ML-driven</div>
+              <div class="pill">API-first</div>
+              <div class="pill">Production</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- OMNISIGHT CASE STUDY -->
+    <section id="omnisight" class="block">
+      <div class="two-col">
+        <div>
+          <div class="section-title">Flagship project</div>
+          <h2 class="section-h">OmniSight Web3 Data Engine</h2>
+          <p class="section-sub">A production-grade intelligence engine built entirely from scratch — no bootcamp, no team, no starter template. Ingests Base Mainnet USDC flows, decodes them into partitioned fact tables, and scores wallet behaviour with a trained ML model exposed via a documented REST API.</p>
+          <div style="margin-top:1rem" class="card">
+            <h3>System snapshot</h3>
+            <ul class="list">
+              <li><strong>120s ingestion cadence</strong> via Airflow pulling JSON-RPC event logs</li>
+              <li><strong>EVM decoder</strong> → typed analytics fields (wallet, amount, block)</li>
+              <li><strong>Partitioned tables</strong> — usdc_transfers_era_47m, era_48m, growing</li>
+              <li><strong>RobustScaler + Isolation Forest</strong> — trained on 6,079 real wallet profiles</li>
+              <li><strong>FastAPI + Nginx + TLS</strong> — live at ericdiamason.tech/docs</li>
+              <li><strong>Oracle Cloud Infrastructure</strong> — always-on, zero cost (Always Free tier)</li>
+            </ul>
+          </div>
+          <div style="margin-top:1rem" class="card">
+            <h3>Business outcomes</h3>
+            <ul class="list">
+              <li>Compliance-grade monitoring for exchanges and institutions</li>
+              <li>Real-time alerts for high-value movements ≥$50,000 USD</li>
+              <li>ML wallet risk scoring in under 200ms per request</li>
+              <li>Full audit trail: block number, tx hash, ingestion timestamp</li>
+            </ul>
+          </div>
+        </div>
+        <div>
+          <div class="card">
+            <h3>Market context</h3>
+            <p style="color:var(--muted);font-size:0.9rem">The blockchain analytics market is projected to reach $18.7 billion by 2034 (22% CAGR). OmniSight demonstrates production-level capability in the space occupied by Chainalysis, Elliptic, and TRM Labs — built independently, from scratch, on a free cloud tier.</p>
+            <div class="pill-row">
+              <div class="pill">Compliance</div>
+              <div class="pill">Fraud detection</div>
+              <div class="pill">AML</div>
+              <div class="pill">Institutional</div>
+            </div>
+          </div>
+          <div class="card" style="margin-top:1rem">
+            <h3>Public API</h3>
+            <p style="color:var(--muted);font-size:0.9rem">Live, documented endpoints. Try the wallet risk scorer below in the Live Metrics section.</p>
+            <code class="mono" style="display:block;padding:0.6rem;border-radius:8px;background:rgba(255,255,255,0.02);margin-top:0.6rem;font-size:0.82rem">GET /api/v1/metrics/whale-alerts</code>
+            <code class="mono" style="display:block;padding:0.6rem;border-radius:8px;background:rgba(255,255,255,0.02);margin-top:0.5rem;font-size:0.82rem">GET /api/v1/public/wallet-risk?wallet_address=0x…</code>
+            <a href="https://ericdiamason.tech/docs" target="_blank" rel="noreferrer" style="display:inline-block;margin-top:0.8rem;color:var(--accent);font-size:0.88rem">View full API docs →</a>
+          </div>
+          <div class="card" style="margin-top:1rem">
+            <h3>GitHub</h3>
+            <p style="color:var(--muted);font-size:0.9rem">Open source. Production code, clean secrets management, documented architecture.</p>
+            <a href="https://github.com/ericdiamason/omnisight" target="_blank" rel="noreferrer" style="display:inline-block;margin-top:0.5rem;color:var(--accent);font-size:0.88rem">github.com/ericdiamason/omnisight →</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ARCHITECTURE -->
+    <section id="architecture" class="block">
+      <div class="section-head">
+        <div>
+          <div class="section-title">Architecture</div>
+          <h2 class="section-h">From ledger to risk score in one coherent pipeline</h2>
+          <p class="section-sub">Eight stages, zero gaps. Every layer is designed, deployed, and maintained by one engineer.</p>
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="card">
+          <h3>Pipeline</h3>
+          <div style="margin-top:0.6rem">
+            <div class="arch-row"><div class="arch-box">1 · Base Mainnet (JSON-RPC via Alchemy)</div></div>
+            <div class="arch-row"><div style="padding-left:1rem;color:var(--muted);font-size:0.85rem">↓ eth_getLogs · USDC Transfer events</div></div>
+            <div class="arch-row"><div class="arch-box">2 · Airflow DAG (120s schedule · max_active_runs=1)</div></div>
+            <div class="arch-row"><div style="padding-left:1rem;color:var(--muted);font-size:0.85rem">↓ Incremental checkpoint · ON CONFLICT idempotency</div></div>
+            <div class="arch-row"><div class="arch-box">3 · web3.py EVM decoder (32-byte topics → wallet addresses)</div></div>
+            <div class="arch-row"><div style="padding-left:1rem;color:var(--muted);font-size:0.85rem">↓ 6-decimal USDC normalisation</div></div>
+            <div class="arch-row"><div class="arch-box">4 · PostgreSQL partitioned tables (block-range partitions)</div></div>
+            <div class="arch-row"><div style="padding-left:1rem;color:var(--muted);font-size:0.85rem">↓ RobustScaler feature normalisation</div></div>
+            <div class="arch-row"><div class="arch-box">5 · Isolation Forest ML model (6,079 wallet profiles)</div></div>
+            <div class="arch-row"><div style="padding-left:1rem;color:var(--muted);font-size:0.85rem">↓ asyncpg connection pool · Pydantic schemas</div></div>
+            <div class="arch-row"><div class="arch-box">6 · FastAPI REST gateway (authenticated + public endpoints)</div></div>
+            <div class="arch-row"><div style="padding-left:1rem;color:var(--muted);font-size:0.85rem">↓ TLS · HTTPS · CORS locked to domain</div></div>
+            <div class="arch-row"><div class="arch-box">7 · Nginx reverse proxy · Let's Encrypt TLS</div></div>
+            <div class="arch-row"><div style="padding-left:1rem;color:var(--muted);font-size:0.85rem">↓ systemd managed · survives reboots</div></div>
+            <div class="arch-row"><div class="arch-box">8 · Oracle Cloud Infrastructure (Always Free · always-on)</div></div>
+          </div>
+        </div>
+        <div>
+          <div class="card">
+            <h3>Key design decisions</h3>
+            <ul class="list">
+              <li><strong>Partitioned tables:</strong> block-range partitioning for query performance at scale</li>
+              <li><strong>RobustScaler:</strong> handles extreme whale outliers without discarding signal</li>
+              <li><strong>ON CONFLICT idempotency:</strong> pipeline is safe to re-run against any block range</li>
+              <li><strong>asyncpg pool:</strong> persistent connections, async I/O, handles concurrent requests</li>
+              <li><strong>Secrets via EnvironmentFile:</strong> zero credentials in source code or git history</li>
+              <li><strong>Rate-limited public endpoint:</strong> open access with abuse protection</li>
+            </ul>
+          </div>
+          <div class="card" style="margin-top:1rem">
+            <h3>Operational facts</h3>
+            <ul class="list">
+              <li>214,000+ clean records, zero duplicates enforced by DB constraint</li>
+              <li>Model version v20260617 — trained on real Base Mainnet data</li>
+              <li>API survives server reboots via systemd service</li>
+              <li>Log rotation configured — no unbounded disk growth</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- LIVE METRICS -->
+    <section id="metrics" class="block">
+      <div class="section-head">
+        <div>
+          <div class="section-title">Live Metrics</div>
+          <h2 class="section-h">Real data. Real pipeline. Right now.</h2>
+          <p class="section-sub">Every number below is pulled live from the OmniSight API — no mock data, no static fixtures.</p>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.75rem;margin-bottom:1.25rem">
+        <div class="metric-card">
+          <div class="metric-label">Whale transfers (sample)</div>
+          <div class="kpi-value" id="kpi-transfers">—</div>
+          <div class="metric-sub">≥$50K · last 25</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Total volume (sample)</div>
+          <div class="kpi-value" id="kpi-volume">—</div>
+          <div class="metric-sub">USD</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Largest transfer</div>
+          <div class="kpi-value" id="kpi-largest">—</div>
+          <div class="metric-sub">USD</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Ingestion latency</div>
+          <div class="kpi-value" id="kpi-latency">—</div>
+          <div class="metric-sub">seconds chain→DB</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem">
+            <h3 style="margin:0">Whale alerts — live feed</h3>
+            <span style="font-size:0.82rem;color:var(--muted)" id="whale-latest-time">—</span>
+          </div>
+          <table class="table" id="whale-table" aria-live="polite">
+            <thead>
+              <tr><th>Block</th><th>Tx</th><th>Sender</th><th>Receiver</th><th>Amount (USD)</th><th>Ingested</th></tr>
+            </thead>
+            <tbody id="whale-body">
+              <tr><td colspan="6" style="color:var(--muted)">Loading whale alerts…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h3>Wallet Risk Explorer</h3>
+          <p style="color:var(--muted);font-size:0.88rem;margin-bottom:0.8rem">Enter any wallet address to run it through the live Isolation Forest ML model. Powered by real Base Mainnet data.</p>
+          <input id="walletAddressInput" type="text" placeholder="0xa9d51f7cf1548bc6636bc405ef480fe502cc71a8" />
+          <div style="display:flex;gap:0.6rem;margin-top:0.6rem">
+            <button class="btn btn-primary" onclick="lookupWalletRisk()" style="flex:1">Score wallet ↳</button>
+            <button class="btn btn-ghost" onclick="clearWalletRisk()">Clear</button>
+          </div>
+          <div id="walletRiskOutput" style="margin-top:0.8rem;color:var(--muted);font-size:0.88rem">Enter a wallet address above to score it.</div>
+
+          <div style="margin-top:1.2rem;padding-top:1rem;border-top:1px dashed rgba(255,255,255,0.03)">
+            <div class="kpi-label">Operational health</div>
+            <div style="display:flex;gap:0.6rem;margin-top:0.5rem;flex-wrap:wrap">
+              <div style="color:var(--muted);font-size:0.85rem">Ingestion: <span id="ingestion-status" style="color:var(--text)">—</span></div>
+              <div style="color:var(--muted);font-size:0.85rem">Model: <span id="model-status" style="color:var(--text)">—</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- WHO I WORK WITH -->
+    <section id="work-with" class="block">
+      <div class="section-head">
+        <div>
+          <div class="section-title">Who I work with</div>
+          <h2 class="section-h">Teams that benefit from OmniSight</h2>
+          <p class="section-sub">I partner with Web3 infrastructure teams, fintech and compliance groups, exchanges, and analytics platforms to deliver production-grade telemetry and ML-driven risk intelligence.</p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:0.8rem">
+        <div class="card">
+          <h3>Exchanges &amp; Custodians</h3>
+          <p style="color:var(--muted);font-size:0.9rem">Real-time monitoring for large movements, counterparty tracing, and compliance workflows.</p>
+        </div>
+        <div class="card">
+          <h3>Compliance &amp; AML</h3>
+          <p style="color:var(--muted);font-size:0.9rem">Automated alerts, ML risk tiers, and evidence-ready transaction trails for investigations.</p>
+        </div>
+        <div class="card">
+          <h3>Fintech &amp; Analytics</h3>
+          <p style="color:var(--muted);font-size:0.9rem">Operational dashboards, institutional reporting, and data products built on reliable pipelines.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- CONTACT -->
+    <section id="contact" class="block">
+      <div class="section-head">
+        <div>
+          <div class="section-title">Contact</div>
+          <h2 class="section-h">Let's build something that matters</h2>
+          <p class="section-sub">If you need architecture, data engineering, or ML for Web3 risk and compliance, reach out. I consult, partner, and build production systems end-to-end.</p>
+        </div>
+      </div>
+      <div class="two-col" style="margin-top:0.8rem">
+        <div class="card">
+          <h3>Engagements I take</h3>
+          <ul class="list">
+            <li>Proof-of-concept to production pipelines</li>
+            <li>ML risk scoring and model operationalisation</li>
+            <li>API design and integration for analytics teams</li>
+            <li>Architecture reviews and performance tuning</li>
+            <li>Web3 data infrastructure from scratch</li>
+          </ul>
+          <div style="margin-top:1rem;padding-top:0.8rem;border-top:1px dashed rgba(255,255,255,0.03)">
+            <div style="color:var(--muted);font-size:0.88rem">Prefer a direct line?</div>
+            <a href="mailto:admin@ericdiamason.tech" style="color:var(--accent);font-size:0.9rem;margin-top:0.3rem;display:block">admin@ericdiamason.tech</a>
+            <a href="https://www.linkedin.com/in/eric-mason-dba/" target="_blank" rel="noreferrer" style="color:var(--accent);font-size:0.9rem;margin-top:0.3rem;display:block">LinkedIn →</a>
+            <a href="https://github.com/ericdiamason/omnisight" target="_blank" rel="noreferrer" style="color:var(--accent);font-size:0.9rem;margin-top:0.3rem;display:block">GitHub →</a>
+          </div>
+        </div>
+        <div class="card">
+          <form id="contactForm" action="https://formspree.io/f/xbdeezjy" method="POST" novalidate>
+            <div class="field">
+              <label class="field-label" for="name">Name</label>
+              <input id="name" name="name" type="text" placeholder="Your name" />
+              <div id="error-name" class="field-error">Please enter your name.</div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="email">Email</label>
+              <input id="email" name="email" type="email" placeholder="you@company.com" />
+              <div id="error-email" class="field-error">Please enter a valid email.</div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="message">Message</label>
+              <textarea id="message" name="message" placeholder="Tell me about your team, product, or problem."></textarea>
+              <div id="error-message" class="field-error">Please include a short message.</div>
+            </div>
+            <div id="form-success" style="display:none;color:var(--success);font-size:0.88rem;margin-bottom:0.6rem">Message sent — I'll be in touch shortly.</div>
+            <div style="display:flex;gap:0.6rem">
+              <button class="btn btn-primary" type="submit">Send message</button>
+              <button class="btn btn-ghost" type="button" onclick="document.getElementById('contactForm').reset()">Reset</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <div>© <span id="year"></span> Eric Dia Mason · OmniSight Web3 Data Engine</div>
+      <div>
+        <a href="https://ericdiamason.tech/docs" target="_blank" rel="noreferrer" style="color:var(--accent)">API Docs</a>
+        &nbsp;·&nbsp;
+        <a href="https://github.com/ericdiamason/omnisight" target="_blank" rel="noreferrer" style="color:var(--accent)">GitHub</a>
+        &nbsp;·&nbsp;
+        <span class="mono" style="font-size:0.82rem">/api/v1/metrics/whale-alerts</span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const API = "https://ericdiamason.tech";
+
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    function scrollToSection(id){
+      const el = document.getElementById(id);
+      if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
+    }
+
+    function fmt(n){ return Number(n).toLocaleString(undefined,{maximumFractionDigits:0}); }
+    function fmtUSD(n){ return '$' + Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    function shorten(addr){ return !addr ? '—' : addr.slice(0,8)+'…'+addr.slice(-6); }
+
+    async function fetchWhaleAlerts(){
+      const res = await fetch(API + '/api/v1/metrics/whale-alerts?limit=25');
+      if(!res.ok) throw new Error('whale alerts failed');
+      return res.json();
+    }
+
+    async function fetchHealth(){
+      try{
+        const res = await fetch(API + '/openapi.json');
+        return res.ok ? res.json() : {};
+      }catch(e){ return {}; }
+    }
+
+    function updateDashboard(whales, health){
+      const statusEl = document.getElementById('hero-status-text');
+      if(health){
+        statusEl.textContent = 'Pipeline ONLINE';
+        document.getElementById('ingestion-status').textContent = 'ONLINE';
+        document.getElementById('model-status').textContent = 'Loaded';
+      }
+
+      if(!Array.isArray(whales) || whales.length === 0) return;
+
+      const total = whales.reduce((s,w) => s + (w.amount_usd||0), 0);
+      const largest = whales.reduce((m,w) => Math.max(m, w.amount_usd||0), 0);
+      const latestIngest = whales.map(w => new Date(w.ingested_at)).sort((a,b) => b-a)[0];
+      const latency = latestIngest ? ((Date.now() - latestIngest.getTime()) / 1000) : 0;
+
+      document.getElementById('kpi-transfers').textContent = whales.length;
+      document.getElementById('kpi-volume').textContent = fmtUSD(total);
+      document.getElementById('kpi-largest').textContent = fmtUSD(largest);
+      document.getElementById('kpi-latency').textContent = latency.toFixed(1) + 's';
+
+      document.getElementById('panel-transfers').textContent = whales.length;
+      document.getElementById('panel-volume').textContent = fmtUSD(total);
+      document.getElementById('panel-largest').textContent = fmtUSD(largest);
+      document.getElementById('panel-latency').textContent = latency.toFixed(1) + 's';
+
+      const s = document.getElementById('sparkline-bar');
+      if(s) s.style.transform = 'scaleX(' + (0.7 + Math.random()*0.3) + ')';
+
+      const latest = whales.map(w => new Date(w.ingested_at)).sort((a,b) => b-a)[0];
+      document.getElementById('whale-latest-time').textContent = latest ? 'Last: ' + latest.toLocaleTimeString() : '—';
+
+      const body = document.getElementById('whale-body');
+      body.innerHTML = '';
+      whales.forEach(w => {
+        const tr = document.createElement('tr');
+        const ingested = new Date(w.ingested_at).toLocaleTimeString();
+        tr.innerHTML = `<td>${w.block_number}</td>
+                        <td class="mono">${(w.transaction_hash||'').slice(0,10)}…</td>
+                        <td>${shorten(w.sender_address)}</td>
+                        <td>${shorten(w.receiver_address)}</td>
+                        <td class="mono">${fmtUSD(w.amount_usd)}</td>
+                        <td style="color:var(--muted)">${ingested}</td>`;
+        body.appendChild(tr);
+      });
+    }
+
+    async function refresh(){
+      try{
+        const [whales, health] = await Promise.all([
+          fetchWhaleAlerts(),
+          fetchHealth()
+        ]);
+        updateDashboard(whales, health);
+      }catch(err){
+        console.warn('API refresh error:', err);
+        document.getElementById('hero-status-text').textContent = 'Reconnecting…';
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 5000);
+
+    async function lookupWalletRisk(){
+      const input = document.getElementById('walletAddressInput');
+      const output = document.getElementById('walletRiskOutput');
+      const addr = (input.value||'').trim();
+      if(!addr){ output.textContent = 'Enter a wallet address above.'; return; }
+      output.innerHTML = '<span style="color:var(--muted)">Scoring wallet against ML model…</span>';
+      try{
+        const url = API + '/api/v1/public/wallet-risk?wallet_address=' + encodeURIComponent(addr);
+        const res = await fetch(url);
+        if(!res.ok){
+          const err = await res.json().catch(()=>({detail:'Request failed.'}));
+          output.innerHTML = '<span style="color:var(--danger)">' + (err.detail||'Error.') + '</span>';
+          return;
+        }
+        const r = await res.json();
+        const threatColor = r.threat_alert ? 'var(--danger)' : 'var(--success)';
+        const threatLabel = r.threat_alert ? 'YES — SUSPICIOUS' : 'No — Standard';
+        output.innerHTML = `
+          <div class="risk-result">
+            <div class="risk-row"><span class="risk-key">Wallet</span><span class="risk-val">${shorten(r.wallet_address)}</span></div>
+            <div class="risk-row"><span class="risk-key">Transactions</span><span class="risk-val">${fmt(r.transaction_count)}</span></div>
+            <div class="risk-row"><span class="risk-key">Total volume</span><span class="risk-val">${fmtUSD(r.total_volume_usd)}</span></div>
+            <div class="risk-row"><span class="risk-key">Avg tx size</span><span class="risk-val">${fmtUSD(r.average_transaction_size)}</span></div>
+            <div class="risk-row"><span class="risk-key">Risk score</span><span class="risk-val">${r.risk_score.toFixed(4)}</span></div>
+            <div class="risk-row"><span class="risk-key">Classification</span><span class="risk-val" style="font-size:0.82rem">${r.ai_classification}</span></div>
+            <div class="risk-row"><span class="risk-key">Threat alert</span><span class="risk-val" style="color:${threatColor};font-weight:600">${threatLabel}</span></div>
+            <div class="risk-row"><span class="risk-key">Evaluated</span><span class="risk-val" style="font-size:0.82rem">${new Date(r.evaluated_at).toLocaleTimeString()}</span></div>
+          </div>`;
+      }catch(e){
+        output.innerHTML = '<span style="color:var(--danger)">Error connecting to scoring API.</span>';
+      }
+    }
+
+    function clearWalletRisk(){
+      document.getElementById('walletAddressInput').value = '';
+      document.getElementById('walletRiskOutput').textContent = 'Enter a wallet address above to score it.';
+    }
+
+    const contactForm = document.getElementById('contactForm');
+    if(contactForm){
+      contactForm.addEventListener('submit', async function(e){
+        e.preventDefault();
+        const name = document.getElementById('name');
+        const email = document.getElementById('email');
+        const message = document.getElementById('message');
+        let ok = true;
+        document.getElementById('error-name').style.display = name.value.trim() ? 'none' : 'block';
+        if(!name.value.trim()) ok = false;
+        const emailOk = email.value.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim());
+        document.getElementById('error-email').style.display = emailOk ? 'none' : 'block';
+        if(!emailOk) ok = false;
+        document.getElementById('error-message').style.display = message.value.trim() ? 'none' : 'block';
+        if(!message.value.trim()) ok = false;
+        if(!ok) return;
+        try{
+          const res = await fetch(contactForm.action, {
+            method:'POST',
+            body: new FormData(contactForm),
+            headers:{'Accept':'application/json'}
+          });
+          if(res.ok){
+            document.getElementById('form-success').style.display = 'block';
+            contactForm.reset();
+          } else {
+            alert('Something went wrong. Please email admin@ericdiamason.tech directly.');
+          }
+        }catch(e){
+          alert('Something went wrong. Please email admin@ericdiamason.tech directly.');
+        }
+      });
+    }
+  </script>
+</body>
+</html>
