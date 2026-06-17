@@ -30,7 +30,7 @@ USDC_CONTRACT_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bda02913"
 TRANSFER_EVENT_TOPIC = (
     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 )
-USDC_DECIMALS = 10 ** 6
+USDC_DECIMALS = 10**6
 GENESIS_BLOCK = 47_025_286
 MAX_BLOCKS_PER_RUN = 5
 
@@ -123,12 +123,14 @@ def incremental_blockchain_etl() -> None:
 
     for block_num in range(start_block, end_block + 1):
         try:
-            raw_logs = w3.eth.get_logs({
-                "fromBlock": block_num,
-                "toBlock": block_num,
-                "address": w3.to_checksum_address(USDC_CONTRACT_ADDRESS),
-                "topics": [TRANSFER_EVENT_TOPIC],
-            })
+            raw_logs = w3.eth.get_logs(
+                {
+                    "fromBlock": block_num,
+                    "toBlock": block_num,
+                    "address": w3.to_checksum_address(USDC_CONTRACT_ADDRESS),
+                    "topics": [TRANSFER_EVENT_TOPIC],
+                }
+            )
             log.info("[BLOCK #%s] %s events.", f"{block_num:,}", len(raw_logs))
 
             block_inserted = 0
@@ -151,18 +153,21 @@ def incremental_blockchain_etl() -> None:
                         VALUES (%s, %s, %s, %s, %s, %s)
                         ON CONFLICT (block_number, transaction_hash) DO NOTHING;
                         """,
-                        (block_num, tx_hash, sender, receiver,
-                         raw_amount, usd_amount),
+                        (block_num, tx_hash, sender, receiver, raw_amount, usd_amount),
                     )
                     block_inserted += 1
 
                 except Exception as log_err:
-                    log.warning("[BLOCK #%s] Skipping log: %s", f"{block_num:,}", log_err)
+                    log.warning(
+                        "[BLOCK #%s] Skipping log: %s", f"{block_num:,}", log_err
+                    )
                     continue
 
             conn.commit()
             total_inserted += block_inserted
-            log.info("[BLOCK #%s] Committed %s records.", f"{block_num:,}", block_inserted)
+            log.info(
+                "[BLOCK #%s] Committed %s records.", f"{block_num:,}", block_inserted
+            )
 
         except Exception as block_err:
             log.warning("[BLOCK #%s] Skipping: %s", f"{block_num:,}", block_err)
@@ -193,7 +198,6 @@ with DAG(
     max_active_runs=1,
     tags=["omnisight", "web3", "usdc", "base"],
 ) as dag:
-
     PythonOperator(
         task_id="execute_blockchain_etl",
         python_callable=incremental_blockchain_etl,
