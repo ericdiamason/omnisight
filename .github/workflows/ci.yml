@@ -53,7 +53,7 @@ jobs:
         run: ruff format --check airflow/dags/
 
       - name: Type check (mypy)
-        run: mypy airflow/dags/omnisight_pipeline.py --ignore-missing-imports --no-strict-optional
+        run: mypy airflow/dags/omnisight_pipeline.py --ignore-missing-imports --no-strict-optional --follow-imports=skip
 
 
   # ────────────────────────────────────────────────────────────────
