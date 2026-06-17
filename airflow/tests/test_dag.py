@@ -105,6 +105,10 @@ def _stub_psycopg2(fetchone_return=(None,)):
 
 sys.path.insert(0, "airflow/dags")
 import importlib
+# Pre-register stubs before DAG import
+_stub_web3()
+_stub_psycopg2()
+
 dag_module = importlib.import_module("omnisight_pipeline")
 _decode_address = dag_module.decode_evm_address
 incremental_etl  = dag_module.incremental_blockchain_etl
