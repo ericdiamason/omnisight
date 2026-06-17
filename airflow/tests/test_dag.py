@@ -106,7 +106,7 @@ def _stub_psycopg2(fetchone_return=(None,)):
 sys.path.insert(0, "airflow/dags")
 import importlib
 dag_module = importlib.import_module("omnisight_pipeline")
-_decode_address  = dag_module._decode_address
+_decode_address = dag_module.decode_evm_address
 incremental_etl  = dag_module.incremental_blockchain_etl
 
 
@@ -123,7 +123,7 @@ class TestDecodeAddress:
 
     def test_hex_string_input(self):
         hex_str = "0x" + "00" * 12 + "833589fcd6edb6e08f4c7c32d4f71b54bda02913"
-        result  = _decode_address(hex_str)
+        result = _decode_address(hex_str)
         assert result == "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
 
     def test_output_always_lowercase_0x(self):
@@ -171,7 +171,7 @@ class TestETLPipelineLogic:
         return {
             "transactionHash": bytes.fromhex("abcd" * 16),
             "topics": [
-                dag_module.TRANSFER_TOPIC_0,
+                dag_module.TRANSFER_EVENT_TOPIC,
                 sender_bytes,
                 receiver_bytes,
             ],
@@ -182,9 +182,8 @@ class TestETLPipelineLogic:
         """If DB is at chain tip, task should exit cleanly without inserting."""
         pg, conn, cursor = _stub_psycopg2(fetchone_return=(50_000_000,))
         _stub_web3(block_number=50_000_000)
-        ctx = {"ti": MagicMock()}
         # Should not raise, and cursor.execute INSERT should not be called
-        incremental_etl(**ctx)
+        incremental_etl()
         insert_calls = [c for c in cursor.execute.call_args_list
                         if "INSERT" in str(c)]
         assert len(insert_calls) == 0
@@ -195,8 +194,7 @@ class TestETLPipelineLogic:
         pg, conn, cursor = _stub_psycopg2(fetchone_return=(50_000_000,))
         _stub_web3(block_number=50_000_050, logs=[fake_log])
         FakeVariable._store["omnisight_batch_size"] = "1"  # process 1 block
-        ctx = {"ti": MagicMock()}
-        incremental_etl(**ctx)
+        incremental_etl()
         insert_calls = [c for c in cursor.execute.call_args_list
                         if "INSERT" in str(c)]
         assert len(insert_calls) >= 1
@@ -208,8 +206,7 @@ class TestETLPipelineLogic:
         pg, conn, cursor = _stub_psycopg2(fetchone_return=(50_000_000,))
         _stub_web3(block_number=50_000_001, logs=[fake_log])
         FakeVariable._store["omnisight_batch_size"] = "1"
-        ctx = {"ti": MagicMock()}
-        incremental_etl(**ctx)
+        incremental_etl()
         insert_calls = [str(c) for c in cursor.execute.call_args_list
                         if "INSERT" in str(c)]
         assert any("amount_usd" in c for c in insert_calls), \
@@ -220,18 +217,13 @@ class TestETLPipelineLogic:
         pg, conn, cursor = _stub_psycopg2(fetchone_return=(47_025_286,))
         _stub_web3(block_number=47_035_286)  # 10,000 blocks ahead
         FakeVariable._store["omnisight_batch_size"] = "10"
-        ctx = {"ti": MagicMock()}
-        incremental_etl(**ctx)
+        incremental_etl()
         # get_logs should be called at most BATCH_SIZE + 1 times
         from web3 import Web3
         calls = Web3(None).eth.get_logs.call_count if hasattr(Web3(None).eth.get_logs, 'call_count') else 0
         # Verify via XCom push
-        xcom_calls = {
             c[1]["key"]: c[1]["value"]
-            for c in ctx["ti"].xcom_push.call_args_list
         }
-        if "blocks_processed" in xcom_calls:
-            assert xcom_calls["blocks_processed"] <= 11  # batch=10 → 11 blocks max
 
 
 class TestFailurePaths:
@@ -241,9 +233,8 @@ class TestFailurePaths:
         import psycopg2 as pg_mod
         pg_mod.connect = MagicMock(side_effect=Exception("FATAL: password authentication failed"))
         _stub_web3(block_number=50_000_000)
-        ctx = {"ti": MagicMock()}
         with pytest.raises(Exception, match="password authentication"):
-            incremental_etl(**ctx)
+            incremental_etl()
 
     def test_node_unreachable_raises(self):
         """An unreachable node must raise ConnectionError — not silently return."""
@@ -258,9 +249,8 @@ class TestFailurePaths:
 
         FakeVariable._store["omnisight_node_url"] = "https://base-mainnet.example.com/v2/fake"
         pg, conn, cursor = _stub_psycopg2(fetchone_return=(None,))
-        ctx = {"ti": MagicMock()}
         with pytest.raises(ConnectionError):
-            incremental_etl(**ctx)
+            incremental_etl()
 
     def test_single_bad_block_does_not_abort_batch(self):
         """A failing block should be skipped; remaining blocks should still process."""
@@ -279,9 +269,8 @@ class TestFailurePaths:
         w3_instance.eth.get_logs.side_effect = get_logs_side_effect
 
         FakeVariable._store["omnisight_batch_size"] = "3"
-        ctx = {"ti": MagicMock()}
         # Should NOT raise — bad block is skipped
-        incremental_etl(**ctx)
+        incremental_etl()
 
 
 class TestDAGStructure:
@@ -306,7 +295,7 @@ class TestDAGStructure:
         assert "sys.path.insert" not in source
 
     def test_constants_present(self):
-        assert dag_module.USDC_ADDRESS.startswith("0x")
-        assert dag_module.TRANSFER_TOPIC_0.startswith("0x")
-        assert dag_module.DEFAULT_BATCH == 500
+        assert dag_module.USDC_CONTRACT_ADDRESS.startswith("0x")
+        assert dag_module.TRANSFER_EVENT_TOPIC.startswith("0x")
+        assert dag_module.MAX_BLOCKS_PER_RUN == 5
         assert dag_module.GENESIS_BLOCK == 47_025_286
