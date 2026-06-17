@@ -195,11 +195,14 @@ class TestETLPipelineLogic:
     def test_inserts_records_for_new_blocks(self):
         """ETL should INSERT one row per log entry found."""
         fake_log = self._make_fake_log(block=50_000_001, amount_raw=1_000_000_000_000)
-        pg, conn, cursor = _stub_psycopg2(fetchone_return=(50_000_000,))
         _stub_web3(block_number=50_000_050, logs=[fake_log])
-        incremental_etl()
-        # Any cursor.execute call that contains INSERT counts
-        all_calls = [str(c) for c in cursor.execute.call_args_list]
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (50_000_000,)
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        with patch.object(dag_module, "_get_db_connection", return_value=mock_conn):
+            incremental_etl()
+        all_calls = [str(c) for c in mock_cursor.execute.call_args_list]
         insert_calls = [c for c in all_calls if "INSERT" in c or "usdc_transfers" in c]
         assert len(insert_calls) >= 1, f"No INSERT found. All calls: {all_calls}"
 
