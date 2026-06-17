@@ -3,6 +3,7 @@ omnisight_pipeline.py
 =====================
 OmniSight Core Airflow DAG — Base Mainnet USDC Ingestion Pipeline
 """
+# ruff: noqa: E402, I001
 
 import logging
 import os
@@ -18,9 +19,9 @@ WORKING_VENV_PATH = "/home/omnisight/venv/lib/python3.9/site-packages"
 if WORKING_VENV_PATH not in sys.path:
     sys.path.insert(0, WORKING_VENV_PATH)
 
-import psycopg2  # noqa: E402
 from airflow import DAG  # noqa: E402
 from airflow.operators.python import PythonOperator  # noqa: E402
+import psycopg2  # noqa: E402
 from web3 import Web3  # noqa: E402
 
 log = logging.getLogger(__name__)
