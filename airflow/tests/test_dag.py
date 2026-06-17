@@ -210,13 +210,16 @@ class TestETLPipelineLogic:
         """adjusted_amount column must be present in INSERT statement."""
         amount_raw = 5_000_000_000_000  # 5M USDC
         fake_log = self._make_fake_log(amount_raw=amount_raw)
-        _stub_web3(block_number=50_000_001, logs=[fake_log])
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = (50_000_000,)
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
-        with patch.object(dag_module, "_get_db_connection", return_value=mock_conn):
+
+        FakeWeb3 = _stub_web3(block_number=50_000_001, logs=[fake_log])
+
+        with patch.object(dag_module, "_get_db_connection", return_value=mock_conn),              patch.object(dag_module, "Web3", FakeWeb3):
             incremental_etl()
+
         insert_calls = [str(c) for c in mock_cursor.execute.call_args_list
                         if "INSERT" in str(c)]
         assert any("adjusted_amount" in c for c in insert_calls),             f"adjusted_amount missing from INSERT. Calls: {insert_calls}"
