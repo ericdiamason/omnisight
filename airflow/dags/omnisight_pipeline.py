@@ -1,43 +1,45 @@
-import sys
-import os
+"""
+omnisight_pipeline.py
+=====================
+OmniSight Core Airflow DAG — Base Mainnet USDC Ingestion Pipeline
+"""
+
 import logging
+import os
+import sys
 from datetime import datetime, timedelta
 
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-
 # ---------------------------------------------------------------------------
-# Runtime path injection
-# Required because Airflow runs as the 'airflow' user but packages are
-# installed in the omnisight venv. This stays until packages are installed
-# into the Airflow venv directly.
+# Runtime path injection — required because Airflow runs as the 'airflow'
+# user but packages are installed in the omnisight venv.
+# noqa: E402 applied to third-party imports below.
 # ---------------------------------------------------------------------------
 WORKING_VENV_PATH = "/home/omnisight/venv/lib/python3.9/site-packages"
 if WORKING_VENV_PATH not in sys.path:
-    sys.path.append(WORKING_VENV_PATH)
+    sys.path.insert(0, WORKING_VENV_PATH)
 
-import psycopg2
-from web3 import Web3
+import psycopg2  # noqa: E402
+from airflow import DAG  # noqa: E402
+from airflow.operators.python import PythonOperator  # noqa: E402
+from web3 import Web3  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 USDC_CONTRACT_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bda02913"
-TRANSFER_EVENT_TOPIC  = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-USDC_DECIMALS         = 10 ** 6
-GENESIS_BLOCK         = 47_025_286
-MAX_BLOCKS_PER_RUN    = 5
+TRANSFER_EVENT_TOPIC = (
+    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+)
+USDC_DECIMALS = 10 ** 6
+GENESIS_BLOCK = 47_025_286
+MAX_BLOCKS_PER_RUN = 5
 
-# ---------------------------------------------------------------------------
-# Secrets — read from environment, never hardcoded
-# ---------------------------------------------------------------------------
+
 def _get_node_url() -> str:
     url = os.getenv("OMNISIGHT_NODE_URL")
     if not url:
         raise RuntimeError("OMNISIGHT_NODE_URL is not set in /etc/omnisight.env")
     return url
+
 
 def _get_db_connection():
     password = os.getenv("OMNISIGHT_DB_PASS")
@@ -50,13 +52,12 @@ def _get_db_connection():
         password=password,
     )
 
-# ---------------------------------------------------------------------------
-# EVM decoders
-# ---------------------------------------------------------------------------
+
 def decode_evm_address(topic_bytes) -> str:
     """Converts 32-byte EVM topic to 42-char wallet address."""
     hex_str = topic_bytes.hex() if isinstance(topic_bytes, bytes) else str(topic_bytes)
     return "0x" + hex_str.replace("0x", "").replace("0X", "")[-40:].lower()
+
 
 def decode_usdc_amount(data_field) -> tuple:
     """Decodes Transfer data field to (raw_int, usd_float)."""
@@ -64,9 +65,7 @@ def decode_usdc_amount(data_field) -> tuple:
     raw_int = int(raw_hex, 16) if raw_hex and raw_hex not in ("0x", "0X", "") else 0
     return raw_int, raw_int / USDC_DECIMALS
 
-# ---------------------------------------------------------------------------
-# Core ETL
-# ---------------------------------------------------------------------------
+
 def incremental_blockchain_etl() -> None:
     """
     Incremental Base Mainnet USDC ingestion.
@@ -74,15 +73,11 @@ def incremental_blockchain_etl() -> None:
     Finds MAX(block_number) in PostgreSQL as checkpoint, fetches the next
     batch of blocks from Alchemy, decodes Transfer events, and inserts
     records with ON CONFLICT (block_number, transaction_hash) DO NOTHING.
-
-    The conflict clause matches the unique constraint on the partitioned
-    table: uq_transaction_hash (block_number, transaction_hash).
     Commits per block so partial progress is preserved on failure.
     """
     log.info("=" * 60)
     log.info("[OMNISIGHT] Starting incremental blockchain ETL")
 
-    # --- Connect to DB and find checkpoint ---
     try:
         conn = _get_db_connection()
         cursor = conn.cursor()
@@ -101,7 +96,6 @@ def incremental_blockchain_etl() -> None:
         conn.close()
         raise
 
-    # --- Connect to Base Mainnet ---
     try:
         w3 = Web3(Web3.HTTPProvider(_get_node_url()))
         if not w3.is_connected():
@@ -113,9 +107,8 @@ def incremental_blockchain_etl() -> None:
         conn.close()
         raise
 
-    # --- Calculate block range ---
     start_block = last_block + 1
-    end_block   = min(chain_tip, start_block + MAX_BLOCKS_PER_RUN - 1)
+    end_block = min(chain_tip, start_block + MAX_BLOCKS_PER_RUN - 1)
 
     if start_block > chain_tip:
         log.info("[SYNC] Already at chain tip. Nothing to process.")
@@ -125,16 +118,15 @@ def incremental_blockchain_etl() -> None:
 
     log.info("[SYNC] Processing #%s → #%s", f"{start_block:,}", f"{end_block:,}")
 
-    # --- Block loop ---
     total_inserted = 0
 
     for block_num in range(start_block, end_block + 1):
         try:
             raw_logs = w3.eth.get_logs({
                 "fromBlock": block_num,
-                "toBlock":   block_num,
-                "address":   w3.to_checksum_address(USDC_CONTRACT_ADDRESS),
-                "topics":    [TRANSFER_EVENT_TOPIC],
+                "toBlock": block_num,
+                "address": w3.to_checksum_address(USDC_CONTRACT_ADDRESS),
+                "topics": [TRANSFER_EVENT_TOPIC],
             })
             log.info("[BLOCK #%s] %s events.", f"{block_num:,}", len(raw_logs))
 
@@ -146,7 +138,7 @@ def incremental_blockchain_etl() -> None:
                         if isinstance(event_log["transactionHash"], bytes)
                         else event_log["transactionHash"]
                     )
-                    sender   = decode_evm_address(event_log["topics"][1])
+                    sender = decode_evm_address(event_log["topics"][1])
                     receiver = decode_evm_address(event_log["topics"][2])
                     raw_amount, usd_amount = decode_usdc_amount(event_log["data"])
 
@@ -180,17 +172,15 @@ def incremental_blockchain_etl() -> None:
     conn.close()
     log.info("[OMNISIGHT] ETL complete. %s records inserted.", total_inserted)
 
-# ---------------------------------------------------------------------------
-# Airflow DAG
-# ---------------------------------------------------------------------------
+
 default_args = {
-    "owner":             "omnisight",
-    "depends_on_past":   False,
-    "start_date":        datetime(2026, 1, 1),
-    "email_on_failure":  False,
-    "email_on_retry":    False,
-    "retries":           2,
-    "retry_delay":       timedelta(seconds=30),
+    "owner": "omnisight",
+    "depends_on_past": False,
+    "start_date": datetime(2026, 1, 1),
+    "email_on_failure": False,
+    "email_on_retry": False,
+    "retries": 2,
+    "retry_delay": timedelta(seconds=30),
 }
 
 with DAG(
