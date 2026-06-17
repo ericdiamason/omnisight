@@ -1,223 +1,209 @@
-"""
-OmniSight Blockchain ETL Pipeline
-==================================
-Base Mainnet USDC Transfer ingestion via Airflow 3.
-
-Production fixes applied:
-  - Credentials loaded from Airflow Connections/Variables (never hardcoded)
-  - All DB/node connections opened inside task function only
-  - sys.path manipulation removed — venv activated at container level
-  - Exceptions raised (not swallowed) so Airflow marks failures correctly
-  - Batch size configurable via Airflow Variable (default 500 blocks)
-  - Slack alerting on failure via on_failure_callback
-  - amount_usd column aligned with API schema
-"""
-
+import sys
+import os
 import logging
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.hooks.base import BaseHook
-from airflow.models import Variable
 from airflow.operators.python import PythonOperator
+
+# ---------------------------------------------------------------------------
+# Runtime path injection
+# Required because Airflow runs as the 'airflow' user but packages are
+# installed in the omnisight venv. This stays until packages are installed
+# into the Airflow venv directly.
+# ---------------------------------------------------------------------------
+WORKING_VENV_PATH = "/home/omnisight/venv/lib/python3.9/site-packages"
+if WORKING_VENV_PATH not in sys.path:
+    sys.path.append(WORKING_VENV_PATH)
+
+import psycopg2
+from web3 import Web3
 
 log = logging.getLogger(__name__)
 
-# ── Constants (non-secret) ────────────────────────────────────────────────────
-USDC_ADDRESS      = "0x833589fCD6eDb6E08f4c7C32D4f71b54bda02913"
-TRANSFER_TOPIC_0  = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-GENESIS_BLOCK     = 47_025_286   # OmniSight start block
-DEFAULT_BATCH     = 500          # blocks per run — overridable via Airflow Variable
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+USDC_CONTRACT_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bda02913"
+TRANSFER_EVENT_TOPIC  = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+USDC_DECIMALS         = 10 ** 6
+GENESIS_BLOCK         = 47_025_286
+MAX_BLOCKS_PER_RUN    = 5
 
+# ---------------------------------------------------------------------------
+# Secrets — read from environment, never hardcoded
+# ---------------------------------------------------------------------------
+def _get_node_url() -> str:
+    url = os.getenv("OMNISIGHT_NODE_URL")
+    if not url:
+        raise RuntimeError("OMNISIGHT_NODE_URL is not set in /etc/omnisight.env")
+    return url
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _get_db_conn():
-    """
-    Open a psycopg2 connection using the Airflow Connection 'omnisight_postgres'.
-    Configure via: Admin → Connections → omnisight_postgres (Postgres type).
-    Never hardcode credentials.
-    """
-    import psycopg2
-    conn_meta = BaseHook.get_connection("omnisight_postgres")
+def _get_db_connection():
+    password = os.getenv("OMNISIGHT_DB_PASS")
+    if not password:
+        raise RuntimeError("OMNISIGHT_DB_PASS is not set in /etc/omnisight.env")
     return psycopg2.connect(
-        host=conn_meta.host,
-        port=conn_meta.port or 5432,
-        dbname=conn_meta.schema,
-        user=conn_meta.login,
-        password=conn_meta.password,
+        host=os.getenv("OMNISIGHT_DB_HOST", "127.0.0.1"),
+        database=os.getenv("OMNISIGHT_DB_NAME", "postgres"),
+        user=os.getenv("OMNISIGHT_DB_USER", "omnisight_user"),
+        password=password,
     )
 
-
-def _get_web3():
-    """
-    Return a connected Web3 instance using the node URL stored in
-    Airflow Variable 'omnisight_node_url'.
-    Set via: Admin → Variables → omnisight_node_url = https://base-mainnet.g.alchemy.com/v2/YOUR_KEY
-    """
-    from web3 import Web3
-    node_url = Variable.get("omnisight_node_url")
-    w3 = Web3(Web3.HTTPProvider(node_url, request_kwargs={"timeout": 30}))
-    if not w3.is_connected():
-        raise ConnectionError(f"Cannot connect to node: {node_url[:40]}…")
-    return w3
-
-
-def _decode_address(topic_bytes) -> str:
+# ---------------------------------------------------------------------------
+# EVM decoders
+# ---------------------------------------------------------------------------
+def decode_evm_address(topic_bytes) -> str:
+    """Converts 32-byte EVM topic to 42-char wallet address."""
     hex_str = topic_bytes.hex() if isinstance(topic_bytes, bytes) else str(topic_bytes)
-    return "0x" + hex_str[-40:]
+    return "0x" + hex_str.replace("0x", "").replace("0X", "")[-40:].lower()
 
+def decode_usdc_amount(data_field) -> tuple:
+    """Decodes Transfer data field to (raw_int, usd_float)."""
+    raw_hex = data_field.hex() if isinstance(data_field, bytes) else str(data_field)
+    raw_int = int(raw_hex, 16) if raw_hex and raw_hex not in ("0x", "0X", "") else 0
+    return raw_int, raw_int / USDC_DECIMALS
 
-def _slack_failure_alert(context):
-    """Post a Slack message on task failure. Requires Airflow Connection 'slack_webhook'."""
-    try:
-        import requests
-        webhook = BaseHook.get_connection("slack_webhook").host
-        task_id  = context["task_instance"].task_id
-        dag_id   = context["dag"].dag_id
-        exec_dt  = context["execution_date"]
-        err      = context.get("exception", "unknown error")
-        requests.post(webhook, json={
-            "text": (
-                f":red_circle: *OmniSight DAG failure*\n"
-                f"*DAG:* `{dag_id}` | *Task:* `{task_id}`\n"
-                f"*Run:* `{exec_dt}` | *Error:* `{err}`"
-            )
-        }, timeout=10)
-    except Exception as slack_err:
-        log.warning("Slack alert failed (non-critical): %s", slack_err)
-
-
-# ── Core ETL task ─────────────────────────────────────────────────────────────
-
-def incremental_blockchain_etl(**context):
+# ---------------------------------------------------------------------------
+# Core ETL
+# ---------------------------------------------------------------------------
+def incremental_blockchain_etl() -> None:
     """
-    Incremental ETL: pulls USDC Transfer logs from Base Mainnet and upserts
-    into omnisight.usdc_transfers. Fully idempotent via ON CONFLICT.
+    Incremental Base Mainnet USDC ingestion.
 
-    Batch size is controlled by Airflow Variable 'omnisight_batch_size'
-    (default: 500). After any downtime the pipeline catches up automatically
-    by processing BATCH_SIZE blocks per 2-minute run.
+    Finds MAX(block_number) in PostgreSQL as checkpoint, fetches the next
+    batch of blocks from Alchemy, decodes Transfer events, and inserts
+    records with ON CONFLICT (block_number, transaction_hash) DO NOTHING.
+
+    The conflict clause matches the unique constraint on the partitioned
+    table: uq_transaction_hash (block_number, transaction_hash).
+    Commits per block so partial progress is preserved on failure.
     """
-    batch_size = int(Variable.get("omnisight_batch_size", default_var=DEFAULT_BATCH))
+    log.info("=" * 60)
+    log.info("[OMNISIGHT] Starting incremental blockchain ETL")
 
-    # ── 1. Open connections INSIDE the task (never at module level) ───────────
-    conn = _get_db_conn()
-    w3   = _get_web3()
-
+    # --- Connect to DB and find checkpoint ---
     try:
+        conn = _get_db_connection()
         cursor = conn.cursor()
+        log.info("[DB] Connected to PostgreSQL.")
+    except Exception as exc:
+        log.error("[DB] Connection failed: %s", exc)
+        raise
 
-        # ── 2. Determine sync range ───────────────────────────────────────────
+    try:
         cursor.execute("SELECT MAX(block_number) FROM omnisight.usdc_transfers;")
-        row = cursor.fetchone()
-        max_db_block = row[0] if row and row[0] else None
+        result = cursor.fetchone()
+        last_block = result[0] if result and result[0] else GENESIS_BLOCK - 1
+        log.info("[DB] Checkpoint: block #%s", f"{last_block:,}")
+    except Exception as exc:
+        log.error("[DB] Checkpoint query failed: %s", exc)
+        conn.close()
+        raise
 
-        live_tip    = w3.eth.block_number
-        start_block = (max_db_block + 1) if max_db_block else GENESIS_BLOCK
-        end_block   = min(live_tip, start_block + batch_size)
+    # --- Connect to Base Mainnet ---
+    try:
+        w3 = Web3(Web3.HTTPProvider(_get_node_url()))
+        if not w3.is_connected():
+            raise ConnectionError("Web3 provider returned disconnected state.")
+        chain_tip = w3.eth.block_number
+        log.info("[NODE] Chain tip: #%s", f"{chain_tip:,}")
+    except Exception as exc:
+        log.error("[NODE] Alchemy connection failed: %s", exc)
+        conn.close()
+        raise
 
-        if start_block > live_tip:
-            log.info("Pipeline fully synced at block #%s. Nothing to do.", live_tip)
-            return
+    # --- Calculate block range ---
+    start_block = last_block + 1
+    end_block   = min(chain_tip, start_block + MAX_BLOCKS_PER_RUN - 1)
 
-        lag = live_tip - start_block
-        log.info(
-            "Sync range: #%s → #%s  |  batch=%s  |  chain lag=%s blocks",
-            start_block, end_block, batch_size, lag,
-        )
+    if start_block > chain_tip:
+        log.info("[SYNC] Already at chain tip. Nothing to process.")
+        cursor.close()
+        conn.close()
+        return
 
-        # ── 3. Fetch and insert logs ──────────────────────────────────────────
-        total_inserted = 0
+    log.info("[SYNC] Processing #%s → #%s", f"{start_block:,}", f"{end_block:,}")
 
-        for block_num in range(start_block, end_block + 1):
-            try:
-                raw_logs = w3.eth.get_logs({
-                    "fromBlock": block_num,
-                    "toBlock":   block_num,
-                    "address":   w3.to_checksum_address(USDC_ADDRESS),
-                    "topics":    [TRANSFER_TOPIC_0],
-                })
+    # --- Block loop ---
+    total_inserted = 0
 
-                inserted = 0
-                for log_entry in raw_logs:
-                    tx_hash  = log_entry["transactionHash"].hex()
-                    sender   = _decode_address(log_entry["topics"][1])
-                    receiver = _decode_address(log_entry["topics"][2])
+    for block_num in range(start_block, end_block + 1):
+        try:
+            raw_logs = w3.eth.get_logs({
+                "fromBlock": block_num,
+                "toBlock":   block_num,
+                "address":   w3.to_checksum_address(USDC_CONTRACT_ADDRESS),
+                "topics":    [TRANSFER_EVENT_TOPIC],
+            })
+            log.info("[BLOCK #%s] %s events.", f"{block_num:,}", len(raw_logs))
 
-                    raw_hex   = log_entry["data"].hex() if isinstance(log_entry["data"], bytes) else log_entry["data"]
-                    raw_value = int(raw_hex, 16) if raw_hex and raw_hex != "0x" else 0
-                    # adjusted_amount: human-readable USDC (6 decimals)
-                    # amount_usd: same value — USDC is 1:1 USD pegged
-                    amount_usd = raw_value / 10 ** 6
+            block_inserted = 0
+            for event_log in raw_logs:
+                try:
+                    tx_hash = (
+                        event_log["transactionHash"].hex()
+                        if isinstance(event_log["transactionHash"], bytes)
+                        else event_log["transactionHash"]
+                    )
+                    sender   = decode_evm_address(event_log["topics"][1])
+                    receiver = decode_evm_address(event_log["topics"][2])
+                    raw_amount, usd_amount = decode_usdc_amount(event_log["data"])
 
                     cursor.execute(
                         """
                         INSERT INTO omnisight.usdc_transfers
                             (block_number, transaction_hash, sender_address,
-                             receiver_address, raw_amount, adjusted_amount, amount_usd, ingested_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                             receiver_address, raw_amount, adjusted_amount)
+                        VALUES (%s, %s, %s, %s, %s, %s)
                         ON CONFLICT (block_number, transaction_hash) DO NOTHING;
                         """,
                         (block_num, tx_hash, sender, receiver,
-                         str(raw_value), amount_usd, amount_usd),
+                         raw_amount, usd_amount),
                     )
-                    inserted += 1
+                    block_inserted += 1
 
-                conn.commit()
-                total_inserted += inserted
-                log.info("Block #%s: %s records inserted.", block_num, inserted)
+                except Exception as log_err:
+                    log.warning("[BLOCK #%s] Skipping log: %s", f"{block_num:,}", log_err)
+                    continue
 
-            except Exception as block_err:
-                # Roll back only the current block — do not abort the whole batch
-                conn.rollback()
-                log.warning("Block #%s skipped — transient error: %s", block_num, block_err)
-                continue
+            conn.commit()
+            total_inserted += block_inserted
+            log.info("[BLOCK #%s] Committed %s records.", f"{block_num:,}", block_inserted)
 
-        log.info(
-            "Batch complete. Blocks #%s–#%s processed. Total records: %s.",
-            start_block, end_block, total_inserted,
-        )
+        except Exception as block_err:
+            log.warning("[BLOCK #%s] Skipping: %s", f"{block_num:,}", block_err)
+            conn.rollback()
+            continue
 
-        # Push metrics to XCom for downstream tasks / monitoring
-        context["ti"].xcom_push(key="blocks_processed", value=end_block - start_block + 1)
-        context["ti"].xcom_push(key="records_inserted", value=total_inserted)
-        context["ti"].xcom_push(key="chain_lag_blocks", value=lag)
+    cursor.close()
+    conn.close()
+    log.info("[OMNISIGHT] ETL complete. %s records inserted.", total_inserted)
 
-    finally:
-        # Always close — even if an unhandled exception occurs
-        cursor.close()
-        conn.close()
-
-
-# ── DAG definition ────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
+# Airflow DAG
+# ---------------------------------------------------------------------------
 default_args = {
-    "owner":            "omnisight",
-    "depends_on_past":  False,
-    "start_date":       datetime(2026, 1, 1),
-    "retries":          3,
-    "retry_delay":      timedelta(seconds=30),
-    "retry_exponential_backoff": True,
-    "email_on_failure": False,   # using Slack callback instead
-    "email_on_retry":   False,
-    "on_failure_callback": _slack_failure_alert,
+    "owner":             "omnisight",
+    "depends_on_past":   False,
+    "start_date":        datetime(2026, 1, 1),
+    "email_on_failure":  False,
+    "email_on_retry":    False,
+    "retries":           2,
+    "retry_delay":       timedelta(seconds=30),
 }
 
 with DAG(
     dag_id="omnisight_blockchain_pipeline",
     default_args=default_args,
-    description="Autonomous Base Mainnet USDC ingestion — OmniSight",
+    description="Incremental Base Mainnet USDC ingestion — 120s cadence, 5 blocks/run.",
     schedule=timedelta(minutes=2),
     catchup=False,
     max_active_runs=1,
-    tags=["omnisight", "blockchain", "usdc", "base-mainnet"],
+    tags=["omnisight", "web3", "usdc", "base"],
 ) as dag:
 
-    ingest = PythonOperator(
-        task_id="incremental_blockchain_etl",
+    PythonOperator(
+        task_id="execute_blockchain_etl",
         python_callable=incremental_blockchain_etl,
-        provide_context=True,
-        execution_timeout=timedelta(minutes=8),   # hard kill if hung
-        pool="blockchain_pool",                    # limit concurrent node calls
     )

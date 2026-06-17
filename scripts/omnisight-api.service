@@ -1,0 +1,16 @@
+[Unit]
+Description=OmniSight FastAPI Service
+After=network.target
+
+[Service]
+User=opc
+Group=opc
+Type=simple
+EnvironmentFile=/etc/omnisight.env
+WorkingDirectory=/home/omnisight
+ExecStart=/home/omnisight/venv/bin/uvicorn main_api:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
