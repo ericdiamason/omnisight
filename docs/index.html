@@ -40,7 +40,7 @@
     header{position:sticky;top:0;z-index:40;background:linear-gradient(180deg,rgba(2,6,23,0.6),rgba(2,6,23,0.35));backdrop-filter:blur(8px);border-bottom:1px solid rgba(255,255,255,0.03)}
     .nav{display:flex;align-items:center;justify-content:space-between;padding:0.75rem 0}
     .brand{display:flex;align-items:center;gap:0.75rem}
-    .brand-mark{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent-3));display:flex;align-items:center;justify-content:center;font-weight:700;color:#021024}
+    .brand-mark{width:40px;height:40px;display:flex;align-items:center;justify-content:center}
     .brand-title{display:flex;flex-direction:column}
     .brand-name{font-weight:700;letter-spacing:0.02em}
     .brand-sub{font-size:0.78rem;color:var(--muted)}
@@ -131,7 +131,15 @@
     <div class="container">
       <nav class="nav">
         <div class="brand">
-          <div class="brand-mark">OS</div>
+          <div class="brand-mark">
+            <svg width="40" height="40" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+              <rect width="80" height="80" rx="16" fill="#0F172A"/>
+              <rect x="8" y="8" width="64" height="64" rx="12" fill="#1E293B"/>
+              <text x="40" y="50" font-family="ui-monospace,monospace" font-size="28" font-weight="700" fill="#38BDF8" text-anchor="middle" letter-spacing="-2">E</text>
+              <circle cx="40" cy="41" r="3" fill="#4ADE80"/>
+              <text x="40" y="65" font-family="ui-monospace,monospace" font-size="10" font-weight="400" fill="#4ADE80" text-anchor="middle" letter-spacing="4">D</text>
+            </svg>
+          </div>
           <div class="brand-title">
             <div class="brand-name">Eric Dia Mason</div>
             <div class="brand-sub">Senior Data Architect · Web3 Data Engineer</div>
