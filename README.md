@@ -195,7 +195,7 @@ sudo systemctl restart omnisight-api.service
 
 Deployed on OCI Linux (Always Free tier):
 
-- **OS:** Oracle Linux 8, `opc` service user
+- **OS:** Oracle Linux Server 9.7, `opc` service user
 - **Process management:** systemd — `omnisight-api.service` auto-restarts on failure
 - **TLS:** Let's Encrypt via Certbot, auto-renewing, covers `omnisight.ericdiamason.tech` and `fiscaltrace.ericdiamason.tech` under one certificate
 - **Reverse proxy:** Nginx, dedicated server block for the subdomain — no shared routing with sibling projects
