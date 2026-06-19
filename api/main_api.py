@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import logging
@@ -20,6 +21,7 @@ DB_HOST = os.getenv("OMNISIGHT_DB_HOST", "127.0.0.1")
 DB_NAME = os.getenv("OMNISIGHT_DB_NAME", "postgres")
 DB_USER = os.getenv("OMNISIGHT_DB_USER", "omnisight_user")
 MODEL_PATH = Path(os.getenv("OMNISIGHT_MODEL_PATH", "/home/omnisight/threat_model.pkl"))
+METADATA_PATH = Path("/home/omnisight/threat_model_metadata.json")
 WHALE_THRESHOLD_USD = 50_000.0
 ETH_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
@@ -116,6 +118,57 @@ class AIWalletRiskResponse(BaseModel):
     risk_score: float
     threat_alert: bool
     evaluated_at: datetime
+
+class StatsResponse(BaseModel):
+    total_records: int
+    eligible_wallets: int
+    model_version: str
+    model_trained_at: str
+    model_wallets_trained_on: int
+    timestamp: datetime
+
+
+@app.get("/api/v1/stats", response_model=StatsResponse, tags=["System Check"])
+async def stats():
+    """
+    Live operational statistics. No authentication required.
+
+    Returns current record counts and ML model metadata so frontend
+    displays never go stale relative to the actual pipeline state.
+    """
+    async with app.state.db_pool.acquire() as conn:
+        total_records = await conn.fetchval(
+            "SELECT COUNT(*) FROM omnisight.usdc_transfers;"
+        )
+        eligible_wallets = await conn.fetchval("""
+            SELECT COUNT(*) FROM (
+                SELECT sender_address FROM omnisight.usdc_transfers
+                GROUP BY sender_address HAVING COUNT(*) >= 2
+            ) sub;
+        """)
+
+    model_version = "unknown"
+    model_trained_at = "unknown"
+    model_wallets = 0
+    try:
+        if METADATA_PATH.exists():
+            with open(METADATA_PATH) as f:
+                meta = json.load(f)
+                model_version = meta.get("model_version", "unknown")
+                model_trained_at = meta.get("trained_at", "unknown")
+                model_wallets = meta.get("row_count", 0)
+    except Exception as exc:
+        log.warning("[STATS] Could not read model metadata: %s", exc)
+
+    return StatsResponse(
+        total_records=total_records,
+        eligible_wallets=eligible_wallets,
+        model_version=model_version,
+        model_trained_at=model_trained_at,
+        model_wallets_trained_on=model_wallets,
+        timestamp=datetime.utcnow(),
+    )
+
 
 @app.get("/", response_model=HealthResponse, tags=["System Check"])
 async def root_health():
