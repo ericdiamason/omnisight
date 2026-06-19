@@ -9,10 +9,13 @@ from typing import List, Optional
 import asyncpg
 import joblib
 import numpy as np
-from fastapi import Depends, FastAPI, HTTPException, Security, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -24,6 +27,7 @@ MODEL_PATH = Path(os.getenv("OMNISIGHT_MODEL_PATH", "/home/omnisight/threat_mode
 METADATA_PATH = Path("/home/omnisight/threat_model_metadata.json")
 WHALE_THRESHOLD_USD = 50_000.0
 ETH_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+limiter = Limiter(key_func=get_remote_address)
 
 def _require_env(name: str) -> str:
     value = os.getenv(name)
@@ -52,6 +56,9 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["X-API-Key", "Content-Type"],
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -204,9 +211,8 @@ async def get_whale_alerts(limit: int = 25):
         ) for row in rows
     ]
 
-@app.get("/api/v1/predict/wallet-risk", response_model=AIWalletRiskResponse,
-         tags=["Artificial Intelligence"], summary="ML risk score for a wallet address")
-async def predict_wallet_risk(wallet_address: str, _: str = Depends(require_api_key)):
+async def _score_wallet(wallet_address: str) -> AIWalletRiskResponse:
+    """Shared scoring logic used by both authenticated and public endpoints."""
     if app.state.ai_model is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                             detail="AI scoring engine offline. Run ml/train_model.py.")
@@ -231,7 +237,7 @@ async def predict_wallet_risk(wallet_address: str, _: str = Depends(require_api_
     raw_score = float(app.state.ai_model.score_samples(features)[0])
     is_threat = prediction == -1
     classification = "SUSPICIOUS_HIGH_VELOCITY_ANOMALY" if is_threat else "STANDARD_RETAIL_USER"
-    log.info("[WALLET-RISK] %s → %s (score: %.4f)", wallet_address, classification, raw_score)
+    log.info("[WALLET-RISK] %s -> %s (score: %.4f)", wallet_address, classification, raw_score)
     return AIWalletRiskResponse(
         wallet_address=wallet_address, transaction_count=row["tx_count"],
         total_volume_usd=float(row["total_volume"]),
@@ -239,3 +245,18 @@ async def predict_wallet_risk(wallet_address: str, _: str = Depends(require_api_
         ai_classification=classification, risk_score=raw_score,
         threat_alert=is_threat, evaluated_at=datetime.utcnow(),
     )
+
+
+@app.get("/api/v1/predict/wallet-risk", response_model=AIWalletRiskResponse,
+         tags=["Artificial Intelligence"], summary="ML risk score - authenticated")
+async def predict_wallet_risk(wallet_address: str, _: str = Depends(require_api_key)):
+    """Authenticated wallet scoring. Requires X-API-Key header. Unlimited requests."""
+    return await _score_wallet(wallet_address)
+
+
+@app.get("/api/v1/public/wallet-risk", response_model=AIWalletRiskResponse,
+         tags=["Artificial Intelligence"], summary="ML risk score - public (rate limited)")
+@limiter.limit("10/minute")
+async def predict_wallet_risk_public(request: Request, wallet_address: str):
+    """Public wallet scoring. No authentication required. Rate limited to 10 req/min per IP."""
+    return await _score_wallet(wallet_address)
